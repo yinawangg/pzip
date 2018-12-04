@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 long FileLength = 0;
 char* buffer = 0;
@@ -32,20 +33,36 @@ int readFile(char const* path)
 }
 
 int zipBuf(){
-    char lastChar = buffer[0];
-    int numOccur = 1;
-    for (int c = 1; c <= FileLength; c ++){
-        if (buffer[c] == lastChar) {
-            numOccur++;
-        } else {
-            fwrite(&numOccur, sizeof(int), 1, stdout);
-            fwrite(&lastChar, sizeof(char), 1, stdout);
-            numOccur = 1;
-
+    char c = -1;
+    int num = 0;
+    bool haveNum = false;
+    for (int i = 0; i <= FileLength; i++){
+        if (buffer[i] == '\0' ){
+            if (!haveNum) {
+                return 0;
+            } else {
+                free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
+            }
+        } else if (isdigit(buffer[i])){
+            if (!haveNum) {
+                num = buffer[i];
+                haveNum = true;
+            } else {
+                free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
+            }
+        } else if (isalpha(buffer[i])){
+            if (haveNum){
+                for (int n = 1; n <= num; n++){
+                    fwrite(buffer[i], sizeof(char), 1, stdout);
+                }
+                haveNum = false;
+            } else {
+                free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
+            }
         }
-        lastChar = buffer[c];
-
-
+        else {
+            free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
+        }
     }
     return 0;
 }
