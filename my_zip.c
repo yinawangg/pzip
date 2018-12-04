@@ -36,7 +36,7 @@ int zipBuf(){
         if (buffer[c] == lastChar) {
             numOccur++;
         } else {
-            printf("numOccurs: %d, Char: %c", numOccur, lastChar);
+            printf("numOccurs: %d, Char: %c \n", numOccur, lastChar);
             numOccur = 0;
         }
         lastChar = buffer[c];
