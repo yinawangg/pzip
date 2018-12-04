@@ -33,7 +33,7 @@ int readFile(char const* path)
     return 0;
 }
 
-int zipBuf(){
+int unZipBuf(){
     int num = 0;
     bool haveNum = false;
     for (int i = 1; i <= FileLength; i++){
@@ -41,14 +41,14 @@ int zipBuf(){
             if (!haveNum) {
                 return 0;
             } else {
-                free(buffer),fputs("1 error in zipped file: failed",stderr),exit(1);
+                free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
             }
         } else if (isdigit(buffer[i])){
             if (!haveNum) {
                 num = buffer[i];
                 haveNum = true;
             } else {
-                free(buffer),fputs("2 error in zipped file: failed",stderr),exit(1);
+                free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
             }
         } else if (isalpha(buffer[i])){
             if (haveNum){
@@ -58,19 +58,20 @@ int zipBuf(){
                 }
                 haveNum = false;
             } else {
-                free(buffer),fputs("3 error in zipped file: failed",stderr),exit(1);
+                free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
             }
         }
         else {
-            free(buffer),fputs("4 error in zipped file: failed",stderr),exit(1);
+            free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
         }
     }
+    
     return 0;
 }
 
 int main(int argc, char *argv[]) {
     if (readFile(argv[1]) == 0){
-        zipBuf();
+        unZipBuf();
     };
 
     free(buffer);
