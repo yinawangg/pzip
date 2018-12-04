@@ -36,7 +36,7 @@ int readFile(char const* path)
 int zipBuf(){
     int num = 0;
     bool haveNum = false;
-    for (int i = 0; i <= FileLength; i++){
+    for (int i = 1; i <= FileLength; i++){
         if (buffer[i] == '\0' ){
             if (!haveNum) {
                 return 0;
