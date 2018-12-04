@@ -36,8 +36,8 @@ int zipBuf(){
         if (buffer[c] == lastChar) {
             numOccur++;
         } else {
-            fwrite(numOccur, sizeof(int), 1, stdout);
-            fwrite(lastChar, sizeof(char), 1, stdout);
+            fwrite(&numOccur, sizeof(int), 1, stdout);
+            fwrite(&lastChar, sizeof(char), 1, stdout);
             numOccur = 1;
 
         }
