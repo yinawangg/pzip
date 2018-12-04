@@ -30,14 +30,14 @@ int readFile(char const* path)
 }
 
 int zipBuf(){
-    char lastChar = -1;
-    int numOccur = 0;
-    for (int c = 0; c < FileLength - 1; c ++){
+    char lastChar = buffer[0];
+    int numOccur = 1;
+    for (int c = 1; c < FileLength - 1; c ++){
         if (buffer[c] == lastChar) {
             numOccur++;
         } else {
             printf("numOccurs: %d, Char: %c \n", numOccur, lastChar);
-            numOccur = 0;
+            numOccur = 1;
         }
         lastChar = buffer[c];
 
