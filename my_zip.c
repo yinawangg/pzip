@@ -32,7 +32,7 @@ int readFile(char const* path)
 int zipBuf(){
     char lastChar = buffer[0];
     int numOccur = 1;
-    for (int c = 1; c < FileLength - 1; c ++){
+    for (int c = 1; c <= FileLength; c ++){
         if (buffer[c] == lastChar) {
             numOccur++;
         } else {
