@@ -1,5 +1,5 @@
 /*********************************************************
- * Your Name: Parker Zimmermann
+ * Your Name: Parker Zimmerman
  * Partner Name: Yina Wang
  *********************************************************/
 #include <stdio.h>
