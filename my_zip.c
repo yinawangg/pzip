@@ -5,39 +5,54 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-long fileLength;
+long FileLength = 0;
+char* buffer = 0;
 
-char* load_file(char const* path)
+int readFile(char const* path)
 {
-    char* buffer = 0;
 
-    FILE * f = fopen (path, "rb"); //was "rb"
+    FILE * f = fopen (path, "rb");
 
-    if (f)
-    {
+    if (f) {
       fseek (f, 0, SEEK_END);
-      fileLength = ftell (f);
+      FileLength = ftell (f);
       fseek (f, 0, SEEK_SET);
-      buffer = (char*)malloc ((fileLength+1)*sizeof(char));
-      if (buffer)
-      {
-        if( 1!=fread( buffer , fileLength, 1 , f) )
+      buffer = (char*)malloc ((FileLength+1)*sizeof(char));
+      if (buffer){
+        if( 1!=fread( buffer , FileLength, 1 , f) )
             fclose(f),free(buffer),fputs("entire read fails",stderr),exit(1);
       }
       fclose (f);
     }
-    buffer[fileLength] = '\0';
-    for (int i = 0; i < fileLength; i++) {
-        printf("buffer[%d] == %c\n", i, buffer[i]);
-    }
-    printf("buffer = %s\n", buffer);
+    buffer[FileLength] = '\0';
 
-    fwrite(buffer, sizeof(char), fileLength, stdout);
-    return buffer;
+    return 0;
+}
+
+int zipBuf(){
+    char lastChar = -1;
+    int numOccur = 0;
+    for (int c = 0; c < FileLength - 1; c ++){
+        if (buffer[c] == lastChar) {
+            numOccur++;
+        } else {
+            printf("numOccurs: %d, Char: %c", numOccur, lastChar);
+            numOccur = 0;
+        }
+        lastChar = buffer[c];
+
+
+    }
+    return 0;
+}
+
+int main(int argc, char *argv[]) {
+    if (readFile(argv[1]) == 0){
+        zipBuf();
+    };
 
     free(buffer);
 }
 
-int main(int argc, char *argv[]) {
-    load_file(argv[1]);
-}
+
+    //fwrite(buffer, sizeof(char), FileLength, stdout);
