@@ -33,7 +33,6 @@ int readFile(char const* path)
 }
 
 int zipBuf(){
-    char c = -1;
     int num = 0;
     bool haveNum = false;
     for (int i = 0; i <= FileLength; i++){
@@ -53,7 +52,8 @@ int zipBuf(){
         } else if (isalpha(buffer[i])){
             if (haveNum){
                 for (int n = 1; n <= num; n++){
-                    fwrite(buffer[i], sizeof(char), 1, stdout);
+                    char c = buffer[i];
+                    fwrite(&c, sizeof(char), 1, stdout);
                 }
                 haveNum = false;
             } else {
