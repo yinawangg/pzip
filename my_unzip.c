@@ -2,8 +2,6 @@
  * Your Name: Parker Zimmerman
  * Partner Name: Yina Wang
  *********************************************************/
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -33,22 +31,33 @@ int readFile(char const* path)
     return 0;
 }
 
-int unZipBuf(){
+int zipBuf(){
     int num = 0;
-    bool haveNum = false;
+    char c = -1;
+    //bool haveNum = false;
     for (int i = 1; i <= FileLength; i++){
+      num = atoi("" + buffer[i]);
+      i++;
+      c = buffer[i];
+      for (int n = 1; n <= num; n++) {
+        fwrite(&c, sizeof(char), 1, stdout);
+      }
+      //c = '\n';
+      //fwrite(&c, sizeof(char), 1, stdout);
+
+/*
         if (buffer[i] == '\0' ){
             if (!haveNum) {
                 return 0;
             } else {
-                free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
+                free(buffer),fputs("1 error in zipped file: failed",stderr),exit(1);
             }
         } else if (isdigit(buffer[i])){
             if (!haveNum) {
                 num = buffer[i];
                 haveNum = true;
             } else {
-                free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
+                free(buffer),fputs("2 error in zipped file: failed",stderr),exit(1);
             }
         } else if (isalpha(buffer[i])){
             if (haveNum){
@@ -58,20 +67,19 @@ int unZipBuf(){
                 }
                 haveNum = false;
             } else {
-                free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
+                free(buffer),fputs("3 error in zipped file: failed",stderr),exit(1);
             }
         }
         else {
-            free(buffer),fputs("error in zipped file: failed",stderr),exit(1);
+            free(buffer),fputs("4 error in zipped file: failed",stderr),exit(1);
         }
-    }
-    
+  */  }
     return 0;
 }
 
 int main(int argc, char *argv[]) {
     if (readFile(argv[1]) == 0){
-        unZipBuf();
+        zipBuf();
     };
 
     free(buffer);
