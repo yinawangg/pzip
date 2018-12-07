@@ -23,6 +23,16 @@ int pzip() {
     return 0;
 }
 
+createThreads(int num){
+  for (int n = 1; n <= num; n++) {
+    pthread_t tid;
+		int ret = pthread_create(&tid, NULL, passenger_thread, &station);
+		if (ret != 0) {
+			perror("pthread_create");
+			exit(1);
+  }
+}
+
 int main(int argc, char *argv[]) {
     if (readFile(argv[1]) == 0){
         pzipBuf();
