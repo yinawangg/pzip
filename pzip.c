@@ -48,6 +48,10 @@ void pzip_init(struct file *file){
 FILE *openFile(char const* path){
   FILE* f = fopen(path,"rb");
   if (f){
+      fseek(f, 0, SEEK_END); // seek to end of file
+      size_t size = ftell(f); // get current file pointer
+      fseek(f, 0, SEEK_SET); // seek back to beginning of file
+      mmap(f,size);
     return f;
   } else{
     fputs("file open failed",stderr),exit(1);
@@ -57,8 +61,8 @@ FILE *openFile(char const* path){
 //reading the file in 4k chunks
 void* readFile(void *arg) {
     struct file *file = (struct file*)arg; 
-    lock_acquire(&file->f_lock);
-    char name[2];
+    //lock_acquire(&file->f_lock);
+    char *name = (char *)malloc(2*sizeof(char));
     pthread_getname_np(pthread_self(), name, 2);
     int t_num = (int)name[0];
     int starting_pos = t_num*file->chunk_sizes;
@@ -70,8 +74,8 @@ void* readFile(void *arg) {
     }
     free(name);
     //signals when the file is done reading 
-    cond_signal(&file->finished_reading, &file->f_lock);
-    lock_release(&file->f_lock);            
+    //cond_signal(&file->finished_reading, &file->f_lock);
+    //lock_release(&file->f_lock);            
     
 }
 
@@ -95,7 +99,7 @@ int pzip(struct file *file) {
     return 0;
 }
 
-void createThreads(struct file *file, int num, void * func){
+pthread *createThreads(struct file *file, int num, void * func, pthread *rthrd){
     lock_acquire(&file->f_lock);
     char f;
     if (func == readFile){
@@ -107,11 +111,12 @@ void createThreads(struct file *file, int num, void * func){
     }
     for (int n = 1; n <= num; n++) {
         pthread_t tid;
-            int ret = pthread_create(&tid, NULL, func, &file);
-            int set = pthread_setname_np(&tid,"%d%d",n-1,f);
-            if (ret != 0 || set != 0) {
-                perror("pthread_create");
-                exit(1);
+        int ret = pthread_create(&tid, NULL, func, &file);
+        int set = pthread_setname_np(&tid,"%d%d",n-1,f);
+        if (ret != 0 || set != 0) {
+            perror("pthread_create");
+            exit(1);
+        rthrd[n-1] = tid;
     }
     lock_release(&file->f_lock);
 }
@@ -122,9 +127,10 @@ void manageThreads(struct file *file) {
     file->num_read_threads = num - 1;
     file->num_zip_threads = 1;
     file->chunk_sizes = BUFF_SIZE/file->num_read_threads;
-    createThreads(file, file->num_read_threads, readFile);
+    pthread_t *rthrd = (pthread_t *)malloc([file->num_read_threads] * sizeof(pthread_t));
+    createThreads(file, file->num_read_threads, readFile, rthrd);
     for (int n=0; n<file->num_read_threads;n++){
-        cond_wait(&file->finished_reading, &file->f_lock);
+        pthread_join(rthrd[n], null);
     }
     // once all read threads have terminated the buffer has been filled
     // and we can write to stdout
