@@ -7,6 +7,12 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 
 #include "thread.h"
 
@@ -18,16 +24,11 @@ struct combo {
     char C;
 };
 
-// constructor for the combo struct
-inline struct combo* combo(int* a)
-{
-    return (struct combo*)(a);
-}
-
 // Data structure to hold the lock which will be used 
 struct file {
-    FILE * file; 
-    char *buffer; 
+    char * file; 
+    struct combo *buffer; 
+    int *combos;
     int num_read_threads;
     int num_zip_threads;
     int chunk_sizes;
@@ -39,18 +40,11 @@ struct file {
 
 struct thread_control {
     int thread_num;
-    struct file Fl;
+    struct file *Fl;
 };
-
-inline struct thread_control* thread_control(int n, struct file fl){
-    struct thread_control thrd_cntrl;
-    thrd_cntrl->thread_num = n;
-    thrd_cntrl->Fl = fl;
-}
 
 // initializing the file conditions and locks
 void pzip_init(struct file *fl){
-    fl->buffer = (char*)malloc (BUFF_SIZE*sizeof(char));
     lock_init(&fl->f_lock);
     cond_init(&fl->finished_reading);
     cond_init(&fl->finished_writing);
@@ -58,97 +52,109 @@ void pzip_init(struct file *fl){
 }
 
 // error checking for file opening
-FILE *openFile(char const* path){
-  FILE* f = fopen(path,"rb");
+char *openFile(char const* path){
+  int f = open(path,O_RDONLY);
+  struct stat st;
   if (f){
-      fseek(f, 0, SEEK_END); // seek to end of file
-      size_t size = ftell(f); // get current file pointer
-      fseek(f, 0, SEEK_SET); // seek back to beginning of file
-      f = mmap(NULL,size,(PROT_READ|PROT_WRITE),MAP_SHARED,&f,0);
-    return f;
+      fstat(f,&st);
+      char *fm = mmap(NULL,st.st_size,(PROT_READ|PROT_WRITE),MAP_SHARED,f,0); 
+    return fm;
   } else{
     fputs("file open failed",stderr),exit(1);
   }
+  close(f);
 }
 
 //reading the file in 4k chunks
-void* readFile(void *arg) {
-    struct file *fl = (struct file*)arg; 
-    //lock_acquire(&file->f_lock);
-    char *name = (char *)malloc(2*sizeof(char));
-    //pthread_getname_np(pthread_self(), name, 2);
-    int t_num = (int)name[0];
-    int starting_pos = t_num*fl->chunk_sizes;
-    //size_t offset = starting_pos * sizeof(char);
-    //fsetpos(fl->file,offset);
-    if (&fl->buffer) {
-        if (0 == fread(&fl->buffer[starting_pos], sizeof(char), fl->chunk_sizes, fl->file)){
-             fputs("file read failed",stderr),exit(1);
-        }
-    }
-    free(name);
-    //signals when the file is done reading 
-    //cond_signal(&file->finished_reading, &file->f_lock);
-    //lock_release(&file->f_lock);            
+void *readFile(void *arg) {
+    struct thread_control *tc = (struct thread_control*)arg;
+    struct file *fl = tc->Fl; 
     
+    
+    int t_num = tc->thread_num;
+    int starting_pos = t_num*fl->chunk_sizes;
+    int end_pos = (t_num + 1) * fl->chunk_sizes;
+    struct combo current_combo;
+    int numCombos = 0;
+    for (int n = starting_pos; n < end_pos; n++){
+          if (fl->file[n] == current_combo.C) {
+              current_combo.Num++;
+          } else{
+              fl->buffer[numCombos] = current_combo;
+              numCombos++;
+              current_combo.C = fl->file[n];
+              current_combo.Num = 1;
+          }
+      }
+      if (current_combo.Num > 1){
+          fl->buffer[numCombos] = current_combo;
+    }
+    fl->combos[tc->thread_num] = numCombos;   
+    return NULL; 
 }
 
 // parallelized zipping 
-int pzip(struct file *fl) {
+void *pzip(void *arg) {
+    struct thread_control *tc = (struct thread_control*)arg;
+    struct file *fl = tc->Fl; 
+
     lock_acquire(&fl->f_lock);
-    // int n = 0;
-    // char lastChar = -1;
-    // int numOccur = 0;
-    // // store the contents into an array
-    // while (file) {
-    //     if (!numOccur) {
-    //         numOccur = 1;
-    //         lastChar = file->buffer[0];
-    //  }
-    //}
-    fwrite(&fl->buffer, sizeof(char), BUFF_SIZE, stdout);
-    lock_release(&fl->f_lock);
-   
-           
-    return 0;
+    int t_num = tc->thread_num;
+    int starting_pos = t_num*fl->chunk_sizes;
+    int end_pos = starting_pos + fl->combos[tc->thread_num];
+
+    for (int n = starting_pos; n < end_pos; n++){ 
+        fwrite(&fl->buffer, sizeof(struct combo), 1, stdout);
+    }
+    lock_release(&fl->f_lock); 
+    return NULL;          
 }
 
-pthread_t *createThreads(struct file *fl, int num, void * func, pthread_t *rthrd){
+void *createThreads(struct file *fl, int num, void * func, pthread_t *rthrd){
     lock_acquire(&fl->f_lock);
-    char fun;
-    if (func == readFile){
-        fun = 'r';
-        fl->num_read_threads = num;
-    } else if (func == pzip){
-        fun = 'p';
-        fl->num_zip_threads = num;
-    }
     for (int n = 1; n <= num; n++) {
+        struct thread_control thrd_cntrl;
+        thrd_cntrl.thread_num;
+        thrd_cntrl.Fl = fl;
         pthread_t tid;
-        int ret = pthread_create(&tid, NULL, func, &fl);
-        int set = pthread_setname_np(&tid,"%d%d",n-1,fun);
-        if (ret != 0 || set != 0) {
+        int ret = pthread_create(&tid, NULL, func, &thrd_cntrl);
+        //int set = pthread_setname_np(&tid,"%d%d",n-1,fun);
+        if (ret != 0) {
             perror("pthread_create");
             exit(1);
-        rthrd[n-1] = tid;
+        }
+        if (func == readFile){
+            rthrd[n-1] = tid;
+        }
     }
     lock_release(&fl->f_lock);
+    return NULL;
 }
 
 void manageThreads(struct file *fl) {
     lock_acquire(&fl->f_lock);
-    int num = get_nprocs();
-    fl->num_read_threads = num - 1;
+    fl->num_read_threads = 1; //num - 1;
     fl->num_zip_threads = 1;
-    fl->chunk_sizes = BUFF_SIZE/fl->num_read_threads;
-    pthread_t *rthrd = (pthread_t *)malloc([fl->num_read_threads] * sizeof(pthread_t));
+    fl->chunk_sizes = BUFF_SIZE;
+    fl->buffer = (struct combo*)malloc(BUFF_SIZE*fl->num_read_threads*sizeof(struct combo));
+    fl->combos = (int*)malloc(fl->num_read_threads*sizeof(int));
+    pthread_t *rthrd = (pthread_t *)malloc(fl->num_read_threads * sizeof(pthread_t));
     createThreads(fl, fl->num_read_threads, readFile, rthrd);
     for (int n=0; n<fl->num_read_threads;n++){
-        pthread_join(rthrd[n], null);
+        pthread_join(rthrd[n], NULL);
+        pthread_t tid;
+        struct thread_control thrd_cntrl;
+        thrd_cntrl.thread_num = n+1;
+        thrd_cntrl.Fl = fl;
+        int ret = pthread_create(&tid, NULL, pzip, &thrd_cntrl);
+        if (ret != 0) {
+            perror("pthread_create");
+            exit(1);
+        }
     }
     // once all read threads have terminated the buffer has been filled
     // and we can write to stdout
-    createThreads(fl,fl->num_zip_threads,pzip);
+    createThreads(fl, fl->num_zip_threads, pzip, NULL);
     lock_release(&fl->f_lock);
 }
 
@@ -157,9 +163,9 @@ int main(int argc, char *argv[]){
     struct file fl;
 	pzip_init(&fl);
 
-     fl->file = openFile(argv[1]);
+    fl.file = openFile(argv[1]);
     if (get_nprocs > 0) {
-        createThreads(fl, 1, manageThreads)
+        createThreads(&fl, 1, manageThreads, NULL);
     }
 
     return 0;
