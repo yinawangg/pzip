@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <sys/mman.h>
+#include <sys/sysinfo.h>
 
 #include "thread.h"
 
@@ -35,6 +37,17 @@ struct file {
     struct condition finished_file;    
 };
 
+struct thread_control {
+    int thread_num;
+    struct file Fl;
+};
+
+inline struct thread_control* thread_control(int n, struct file fl){
+    struct thread_control thrd_cntrl;
+    thrd_cntrl->thread_num = n;
+    thrd_cntrl->Fl = fl;
+}
+
 // initializing the file conditions and locks
 void pzip_init(struct file *fl){
     fl->buffer = (char*)malloc (BUFF_SIZE*sizeof(char));
@@ -51,7 +64,7 @@ FILE *openFile(char const* path){
       fseek(f, 0, SEEK_END); // seek to end of file
       size_t size = ftell(f); // get current file pointer
       fseek(f, 0, SEEK_SET); // seek back to beginning of file
-      f = mmap(NULL,size,(PROT_READ|PROT_WRITE),MAP_SHARED,f,0);
+      f = mmap(NULL,size,(PROT_READ|PROT_WRITE),MAP_SHARED,&f,0);
     return f;
   } else{
     fputs("file open failed",stderr),exit(1);
@@ -66,11 +79,12 @@ void* readFile(void *arg) {
     //pthread_getname_np(pthread_self(), name, 2);
     int t_num = (int)name[0];
     int starting_pos = t_num*fl->chunk_sizes;
-    size_t offset = starting_pos * sizeof(char);
-    int n;
-    fsetpos(fl->file,offset);
+    //size_t offset = starting_pos * sizeof(char);
+    //fsetpos(fl->file,offset);
     if (&fl->buffer) {
-        while((n = fread(&fl->buffer[starting_pos], sizeof(char), fl->chunk_sizes, fl->file)));
+        if (0 == fread(&fl->buffer[starting_pos], sizeof(char), fl->chunk_sizes, fl->file)){
+             fputs("file read failed",stderr),exit(1);
+        }
     }
     free(name);
     //signals when the file is done reading 
