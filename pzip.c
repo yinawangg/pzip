@@ -24,12 +24,21 @@ struct combo {
     char C;
 };
 
+// struct combo *copy_combo(struct combo cmbo){
+// 	struct combo *r_combo;
+// 	r_combo->C = cmbo.C;
+// 	r_combo->Num = cmbo.Num;
+// 	return r_combo;
+// }
+
 // Data structure to hold the lock which will be used 
 struct file {
     char * file; 
-    struct combo *buffer; 
+    char *buffer; 
     int file_size;
     int *combos;
+    char last_char;
+    int last_num;
     int num_read_threads;
     int num_zip_threads;
     int chunk_sizes;
@@ -46,6 +55,8 @@ struct thread_control {
 
 // initializing the file conditions and locks
 void pzip_init(struct file *fl){
+    fl->last_char = -1;
+    fl->last_num = 0;
     lock_init(&fl->f_lock);
     cond_init(&fl->finished_reading);
     cond_init(&fl->finished_writing);
@@ -68,54 +79,73 @@ void openFile(char const* path, struct file *file){
 
 //reading the file in 4k chunks
 void *read_file(void *arg) {
+
     struct thread_control *tc = (struct thread_control*)arg;
-    struct file *fl = tc->Fl; 
+    struct file *fl = tc->Fl;
+
     int t_num = tc->thread_num;
     int starting_pos = (t_num - 1)*(fl->chunk_sizes);
     int end_pos = (t_num * (fl->chunk_sizes)) - 1;
     if (end_pos > fl->file_size) {
         end_pos = fl->file_size;
     }
-    struct combo current_combo;
-    int numCombos = 0;
-    current_combo.C = fl->file[starting_pos];
-    current_combo.Num = 1;
+    //struct combo current_combo;
+    int combo_pos = 0;
+    char C = fl->file[starting_pos];
+    int Num = 1;
+    int num_combos = 0;
     for (int n = starting_pos + 1; n < end_pos; n++){
-          if (fl->file[n] == current_combo.C) {
-              current_combo.Num++;
+          if (fl->file[n] == C) {
+              Num++;
           } else{
-              struct combo cmbo;
-              cmbo.C = current_combo.C;
-              cmbo.Num = current_combo.Num;
-              printf("--C-- = %c \n", current_combo.C);
-              printf("--N-- = %d \n", current_combo.Num);
-              fl->buffer[numCombos] = cmbo;
-              numCombos++;
-              current_combo.C = fl->file[n];
-              current_combo.Num = 1;
+              printf("--C-- = %c \n", C);
+              printf("--N-- = %d \n", Num);
+              fl->buffer[combo_pos] = Num;
+              combo_pos = combo_pos + 4;
+              fl->buffer[combo_pos] = C;
+              combo_pos++;
+              C = fl->file[n];
+              Num = 1;
+              num_combos++;
           }
       }
-      if (current_combo.Num > 1){
-          fl->buffer[numCombos] = current_combo;
+      if (Num > 1){
+              printf("--C-- = %c \n", C);
+              printf("--N-- = %d \n", Num);
+              fl->buffer[combo_pos] = Num;
+              combo_pos = combo_pos + 4;
+              fl->buffer[combo_pos] = C;
+              combo_pos++;
+              num_combos++;
     }
-    fl->combos[tc->thread_num-1] = numCombos;
+    fl->combos[tc->thread_num-1] = num_combos;
     free(tc);   
     return NULL; 
 }
 
-// parallelized zipping 
+// "parallelized" writing 
 void *pzip(void *arg) {
     struct thread_control *tc = (struct thread_control*)arg;
     struct file *fl = tc->Fl; 
     lock_acquire(&fl->f_lock);
     int t_num = tc->thread_num;
     int starting_pos = (t_num-1)*fl->chunk_sizes;
-    int end_pos = starting_pos + fl->combos[tc->thread_num-1];
-    for (int n = starting_pos; n < end_pos; n++){
-        char c = fl->buffer[n].C;
-        int num = fl->buffer[n].Num; 
-        fwrite(&num, sizeof(int), 1, stdout);
-        fwrite(&c, sizeof(char), 1, stdout);
+    int starting_num = fl->buffer[starting_pos];
+    //int starting_num = *(starting_num_pos);
+    char starting_char = fl->buffer[starting_pos + 4];
+    int end_pos = starting_pos + (fl->combos[tc->thread_num-1] * 5);
+    if (end_pos > fl->file_size) {
+        end_pos = fl->file_size;
+    }
+    if (starting_char == fl->last_char) {
+        starting_num = starting_num + fl->last_num;
+        fwrite(&starting_num, sizeof(int), 1, stdout);
+        fwrite(&starting_char, sizeof(char), 1, stdout);
+    }
+    for (int n = starting_pos + 5; n < end_pos; n++){
+        fwrite(&fl->buffer[n], sizeof(int), 1, stdout);
+        n = n + 4;
+        fwrite(&fl->buffer[n], sizeof(char), 1, stdout);
     }
     lock_release(&fl->f_lock); 
     return NULL;          
@@ -128,7 +158,6 @@ void create_r_threads(struct file *fl, int num, pthread_t *thrd){
         thrd_cntrl->Fl = fl;
         pthread_t tid;
         int ret = pthread_create(&tid, NULL, read_file, thrd_cntrl);
-        //int set = pthread_setname_np(&tid,"%d%d",n-1,fun);
         if (ret != 0) {
             perror("pthread_create");
             exit(1);
@@ -142,7 +171,7 @@ void *manageThreads(void *arg) {
     fl->num_read_threads = 1; //num - 1;
     fl->num_zip_threads = 1;
     fl->chunk_sizes = BUFF_SIZE;
-    fl->buffer = (struct combo*)malloc(BUFF_SIZE*fl->num_read_threads*sizeof(struct combo));
+    fl->buffer = (char*)malloc(BUFF_SIZE*fl->num_read_threads*(sizeof(int)+sizeof(char)));
     fl->combos = (int*)malloc(fl->num_read_threads*sizeof(int));
     pthread_t *rthrd = (pthread_t *)(malloc(fl->num_read_threads*sizeof(pthread_t)));
     create_r_threads(fl, fl->num_read_threads, rthrd);
