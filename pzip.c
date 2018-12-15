@@ -18,33 +18,23 @@
 
 #define BUFF_SIZE (4*1024)
 
-// Data structure to hold both the character and its frequency
-struct combo {
-    int Num;
-    char C;
-};
-
-// struct combo *copy_combo(struct combo cmbo){
-// 	struct combo *r_combo;
-// 	r_combo->C = cmbo.C;
-// 	r_combo->Num = cmbo.Num;
-// 	return r_combo;
-// }
-
 // Data structure to hold the lock which will be used 
 struct file {
-    char * file; 
+    char * file;
+    int eof; 
     char *buffer; 
     int file_size;
+    int loop_num;
     int *combos;
+    int *read_complete;
     char last_char;
     int last_num;
     int num_read_threads;
     int num_zip_threads;
     int chunk_sizes;
     struct lock f_lock;
+    struct condition made_threads;
     struct condition finished_reading;
-    struct condition finished_writing;
     struct condition finished_file;    
 };
 
@@ -58,8 +48,8 @@ void pzip_init(struct file *fl){
     fl->last_char = -1;
     fl->last_num = 0;
     lock_init(&fl->f_lock);
+    cond_init(&fl->made_threads);
     cond_init(&fl->finished_reading);
-    cond_init(&fl->finished_writing);
     cond_init(&fl->finished_file);
 }
 
@@ -71,6 +61,7 @@ void openFile(char const* path, struct file *file){
       fstat(f,&st);
       file->file = mmap(NULL,st.st_size,PROT_READ,MAP_PRIVATE,f,0); 
       file->file_size = (int) st.st_size;
+      file->eof = 0;
   } else{
     fputs("file open failed",stderr),exit(1);
   }
@@ -79,119 +70,190 @@ void openFile(char const* path, struct file *file){
 
 //reading the file in 4k chunks
 void *read_file(void *arg) {
-
     struct thread_control *tc = (struct thread_control*)arg;
     struct file *fl = tc->Fl;
-
+    //lock_acquire(&fl->f_lock); 
     int t_num = tc->thread_num;
-    int starting_pos = (t_num - 1)*(fl->chunk_sizes);
-    int end_pos = (t_num * (fl->chunk_sizes)) - 1;
-    if (end_pos > fl->file_size) {
-        end_pos = fl->file_size;
+    printf("=========================reading with thread %d==================================\n", t_num);
+    int starting_pos = ((fl->loop_num * fl->num_read_threads) + t_num)*fl->chunk_sizes;
+    printf("\n\n\n\n\n%d\n\n\n\n\n", starting_pos);
+    int end_pos = (starting_pos + (fl->chunk_sizes));
+    if (end_pos >= fl->file_size) {
+        end_pos = (fl->file_size) - 1;
+        fl->eof = 1;
     }
-    //struct combo current_combo;
-    int combo_pos = 0;
-    char C = fl->file[starting_pos];
+    int combo_pos = t_num*(fl->chunk_sizes*(sizeof(int)+sizeof(char)));
+    char C;
+    if (starting_pos <= end_pos){
+        C = fl->file[starting_pos];
+    } else{
+        C = -1;
+    }
     int Num = 1;
     int num_combos = 0;
-    for (int n = starting_pos + 1; n < end_pos; n++){
-          if (fl->file[n] == C) {
-              Num++;
-          } else{
-              printf("--C-- = %c \n", C);
-              printf("--N-- = %d \n", Num);
-              fl->buffer[combo_pos] = Num;
-              combo_pos = combo_pos + 4;
-              fl->buffer[combo_pos] = C;
-              combo_pos++;
-              C = fl->file[n];
-              Num = 1;
-              num_combos++;
-          }
-      }
-      if (Num > 1){
-              printf("--C-- = %c \n", C);
-              printf("--N-- = %d \n", Num);
-              fl->buffer[combo_pos] = Num;
-              combo_pos = combo_pos + 4;
-              fl->buffer[combo_pos] = C;
-              combo_pos++;
-              num_combos++;
+    if (fl->eof == 1) {
+        Num = 0;
     }
-    fl->combos[tc->thread_num-1] = num_combos;
+    for (int n = starting_pos + 1; n < end_pos; n++) {
+        
+        if (fl->file[n] == C) {
+            Num++;
+
+        } else {
+            printf("buffer pos = %d\n", combo_pos);
+            printf("num -- %d\n", Num);
+            printf("char - %c\n", C);
+            fl->buffer[combo_pos] = Num;
+            printf("num saved as -- %d\n", fl->buffer[combo_pos]);
+            combo_pos = combo_pos + 4;
+            fl->buffer[combo_pos] = C;
+            printf("char saved as -- %c\n\n", fl->buffer[combo_pos]);
+            combo_pos++;
+            C = fl->file[n];
+            Num = 1;
+            num_combos++;
+        }
+    }
+    if (Num > 0){
+        printf("buffer pos = %d", combo_pos);
+        printf("num -- %d\n", Num);
+        printf("char - %c\n\n", C);
+        fl->buffer[combo_pos] = Num;
+        combo_pos = combo_pos + 4;
+        fl->buffer[combo_pos] = C;
+        combo_pos++;
+        num_combos++;
+
+    }
+    fl->combos[t_num] = num_combos;
+    lock_acquire(&fl->f_lock); 
+    printf("@@@@@@@@@@@@@@@@@@@@@@@@ finish thread %d @@@@@@@@@@@@@@@@@@@@@\n", t_num);
+    fl->read_complete[t_num] = 1;
+    cond_signal(&fl->finished_reading, &fl->f_lock);
+    lock_release(&fl->f_lock);
     free(tc);   
     return NULL; 
 }
 
 // "parallelized" writing 
 void *pzip(void *arg) {
+    printf("printing");
     struct thread_control *tc = (struct thread_control*)arg;
     struct file *fl = tc->Fl; 
-    lock_acquire(&fl->f_lock);
+    //lock_acquire(&fl->f_lock);
     int t_num = tc->thread_num;
-    int starting_pos = (t_num-1)*fl->chunk_sizes;
+    printf("=========================writing with thread %d==================================\n", t_num);
+    int starting_pos =  t_num*(fl->chunk_sizes*(sizeof(int)+sizeof(char)));
     int starting_num = fl->buffer[starting_pos];
-    //int starting_num = *(starting_num_pos);
     char starting_char = fl->buffer[starting_pos + 4];
-    int end_pos = starting_pos + (fl->combos[tc->thread_num-1] * 5);
-    if (end_pos > fl->file_size) {
-        end_pos = fl->file_size;
-    }
+    int end_pos = starting_pos + ((fl->combos[t_num] - 1) * 5);
+
+    printf("--start-- = %d \n", starting_pos);
+    printf("--end-- = %d \n", end_pos);
+
     if (starting_char == fl->last_char) {
         starting_num = starting_num + fl->last_num;
-        fwrite(&starting_num, sizeof(int), 1, stdout);
-        fwrite(&starting_char, sizeof(char), 1, stdout);
+        printf("starting num : %d \n", starting_num);
+        printf("starting char : %d \n\n", starting_char);
+        // fwrite(&starting_num, sizeof(int), 1, stdout);
+        // fwrite(&starting_char, sizeof(char), 1, stdout);
+    } else {
+        printf("last num : %d \n", fl->last_num);
+        printf("last char : %d \n\n", fl->last_char);
+	    printf("starting num : %d \n", starting_num);
+        printf("starting char : %d \n\n", starting_char);
+        // fwrite(&fl->last_num, sizeof(int), 1, stdout);
+        // fwrite(&fl->last_char, sizeof(char), 1, stdout);
+	    // fwrite(&starting_num, sizeof(int), 1, stdout);
+        // fwrite(&starting_char, sizeof(char), 1, stdout);
     }
+    printf("starting with combo at %d and going to %d\n\n", starting_pos + 5, end_pos);
+    printf("starting with combo int = %d and char = %d\n\n", fl->buffer[starting_pos + 5], fl->buffer[starting_pos+9]);
     for (int n = starting_pos + 5; n < end_pos; n++){
-        fwrite(&fl->buffer[n], sizeof(int), 1, stdout);
-        n = n + 4;
-        fwrite(&fl->buffer[n], sizeof(char), 1, stdout);
+        // fwrite(&fl->buffer[n], sizeof(int), 1, stdout);
+        // n = n + 4;
+        // fwrite(&fl->buffer[n], sizeof(char), 1, stdout);
     }
-    lock_release(&fl->f_lock); 
+    if (fl->eof == 1) {
+        printf("\n\n\n\n\n eof");
+        // char *eof_line = "\n";
+        // fwrite(&fl->buffer[end_pos], sizeof(int), 1, stdout);
+        // fwrite(&fl->buffer[end_pos + 4], sizeof(char), 1, stdout);
+        // fwrite(eof_line, sizeof(char), 1, stdout);
+    } else {
+        printf("updating last char\n\n\n\n");
+        fl->last_num = fl->buffer[end_pos];
+        fl->last_char = fl->buffer[end_pos+4];
+    }
+    //lock_release(&fl->f_lock); 
     return NULL;          
 }
 
 void create_r_threads(struct file *fl, int num, pthread_t *thrd){
-    for (int n = 1; n <= num; n++) {
+    for (int n = 0; n < num; n++) {
         struct thread_control *thrd_cntrl = (struct thread_control*)malloc(sizeof(struct thread_control));
         thrd_cntrl->thread_num = n;
         thrd_cntrl->Fl = fl;
         pthread_t tid;
+        printf("!!!!!!!!!!!!!!!!thread %d!!!!!!!!!!!!!!!!!\n", n);
         int ret = pthread_create(&tid, NULL, read_file, thrd_cntrl);
         if (ret != 0) {
             perror("pthread_create");
             exit(1);
         }
-        thrd[n-1] = tid;
+        thrd[n] = tid;
     }
 }
 
 void *manageThreads(void *arg) {
     struct file *fl = (struct file*)arg;
-    fl->num_read_threads = 1; //num - 1;
+    //int num = get_nprocs();
+    fl->num_read_threads = 2;
     fl->num_zip_threads = 1;
     fl->chunk_sizes = BUFF_SIZE;
     fl->buffer = (char*)malloc(BUFF_SIZE*fl->num_read_threads*(sizeof(int)+sizeof(char)));
     fl->combos = (int*)malloc(fl->num_read_threads*sizeof(int));
     pthread_t *rthrd = (pthread_t *)(malloc(fl->num_read_threads*sizeof(pthread_t)));
-    create_r_threads(fl, fl->num_read_threads, rthrd);
+    fl->read_complete = (int *)(calloc(fl->num_read_threads,sizeof(int)));
+    int loop_size = fl->num_read_threads * fl->chunk_sizes;
+    div_t loops_d = div(fl->file_size,loop_size);
+    int loops = 0;
+    if (loops_d.rem != 0) {
+	    loops = loops_d.quot + 1;
+    } else {
+	    loops = loops_d.quot;
+    }
+    for (int l = 0; l < loops; l++){
+        fl->loop_num = l;
+        create_r_threads(fl, fl->num_read_threads, rthrd);
+        int n = 0;
+        printf("-------------------------------------------------------------------------%d\n", n);
+        for (n; n < fl->num_read_threads; n++){
+            printf("---------------------------------------------------------------------%d\n", n);
+            lock_acquire(&fl->f_lock); 
+            struct thread_control thrd_cntrl;
+            printf("printing thread %d\n", n);
+            thrd_cntrl.thread_num = n;
+            thrd_cntrl.Fl = fl;
+            printf("looking for thread %d\n", n);
+            while(fl->read_complete[n] != 1){
+                printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@need thread %d\n", n);
+                cond_wait(&fl->finished_reading, &fl->f_lock);
+                printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@got signal from thread %d\n", n);
+            }
+            pthread_t tid;
+            
+            printf("printing thread %d\n", thrd_cntrl.thread_num);
+            int ret = pthread_create(&tid, NULL, pzip, &thrd_cntrl);
+            if (ret != 0) {
+                perror("pthread_create");
+                exit(1);
+            }
+            if (n == fl->num_read_threads - 1){
+                pthread_join(tid,NULL);
+            }
 
-
-
-
-    for (int n=0; n<fl->num_read_threads;n++){
-        pthread_join(rthrd[n], NULL);
-        pthread_t tid;
-        struct thread_control thrd_cntrl;
-        thrd_cntrl.thread_num = n+1;
-        thrd_cntrl.Fl = fl;
-        int ret = pthread_create(&tid, NULL, pzip, &thrd_cntrl);
-        if (ret != 0) {
-            perror("pthread_create");
-            exit(1);
-        }
-        if (n == fl->num_read_threads - 1){
-            pthread_join(tid,NULL);
+            lock_release(&fl->f_lock);
         }
     }
     free(fl->buffer);
@@ -215,11 +277,3 @@ int main(int argc, char *argv[]){
     }
      return 0;
 }
-/*
-cant print in parallel
-break the file into certain size chunks based on memory usage
-break those chunks up based on number of threads
-mult threads working on reading file at once
-then use one thread to print chunk
-move onto next chunk once done
-*/
