@@ -23,8 +23,8 @@
 struct file {
     char * file;
     // end of file boolean
-    int eof; 
-    char *buffer; 
+    int eof;
+    char *buffer;
     int file_size;
     int loop_num;
     int *combos;
@@ -38,7 +38,7 @@ struct file {
     struct lock f_lock;
     struct condition made_threads;
     struct condition finished_reading;
-    struct condition finished_file;    
+    struct condition finished_file;
 };
 // Data structure to hold information about specific
 // thread being run such as a thread number + file
@@ -63,11 +63,11 @@ void pzip_init(struct file *fl){
 void openFile(char const* path, struct file *file){
   int f = open(path,O_RDONLY);
   struct stat st;
-  // if the file exists 
+  // if the file exists
   if (f) {
       // use mmap to map the file to our file struct(??)
       fstat(f,&st);
-      file->file = mmap(NULL,st.st_size,PROT_READ,MAP_PRIVATE,f,0); 
+      file->file = mmap(NULL,st.st_size,PROT_READ,MAP_PRIVATE,f,0);
       file->file_size = (int) st.st_size;
       file->eof = 0;
   } else {
@@ -82,23 +82,23 @@ void *read_file(void *arg) {
     // struct to store info for the specifc thread
     struct thread_control *tc = (struct thread_control*)arg;
     // set our file struct to the file
-    struct file *fl = tc->Fl; 
-    // assigning t_num to the thread id 
+    struct file *fl = tc->Fl;
+    // assigning t_num to the thread id
     int t_num = tc->thread_num;
 
 
     //printf("=========================reading with thread %d==================================\n", t_num);
 
 
-    // the starting position in the file found by multiplying how many groups of threads running by 
+    // the starting position in the file found by multiplying how many groups of threads running by
     // the number of read threads and then adding thread id...and then mutiplying by the file's chunk size
     // that we decide to split it by
     int starting_pos = ((fl->loop_num * fl->num_read_threads) + t_num)*fl->chunk_sizes;
-    
-    
+
+
     //printf("\n\n\n\n\n%d\n\n\n\n\n", starting_pos);
-    
-    
+
+
     // the end position is found by add a chunk size to the starting position
     int end_pos = (starting_pos + (fl->chunk_sizes));
     // if the end position is past the file size
@@ -140,28 +140,28 @@ void *read_file(void *arg) {
         if (fl->file[n] == C) {
             Num++;
         // otherwise add the num and char to combo buffer
-        // incrementing the current combo_pos    
+        // incrementing the current combo_pos
         } else {
-            
-            
+
+
             // printf("buffer pos = %d\n", combo_pos);
             // printf("num -- %d\n", Num);
             // printf("char - %c\n", C);
-            
-            
+
+
             fl->buffer[combo_pos] = Num;
-            
-            
+
+
             // printf("num saved as -- %d\n", fl->buffer[combo_pos]);
-            
-            
+
+
             combo_pos = combo_pos + 4;
             fl->buffer[combo_pos] = C;
-            
-            
+
+
             // printf("char saved as -- %c\n\n", fl->buffer[combo_pos]);
-            
-            
+
+
             combo_pos++;
             C = fl->file[n];
             Num = 1;
@@ -174,13 +174,13 @@ void *read_file(void *arg) {
     // then put the character in the combo position
     // increment both combo position and the number of combos
     if (Num > 0){
-        
-        
+
+
         // printf("buffer pos = %d", combo_pos);
         // printf("num -- %d\n", Num);
         // printf("char - %c\n\n", C);
-        
-        
+
+
         fl->buffer[combo_pos] = Num;
         combo_pos = combo_pos + 4;
         fl->buffer[combo_pos] = C;
@@ -191,28 +191,28 @@ void *read_file(void *arg) {
     // put the number of combinations read by current thread into the combo file
     fl->combos[t_num] = num_combos;
     // grab the lock
-    lock_acquire(&fl->f_lock); 
-    
-    
+    lock_acquire(&fl->f_lock);
+
+
     // printf("@@@@@@@@@@@@@@@@@@@@@@@@ finish thread %d @@@@@@@@@@@@@@@@@@@@@\n", t_num);
-    
-    
+
+
     fl->read_complete[t_num] = 1;
     // signal that we are finished with reading
     cond_signal(&fl->finished_reading, &fl->f_lock);
     // release the lock
     lock_release(&fl->f_lock);
     // free up the memory used for specific thread info
-    free(tc);   
-    return NULL; 
+    free(tc);
+    return NULL;
 }
 
-// function for "parallelized" writing 
+// function for "parallelized" writing
 void *pzip(void *arg) {
-    
-    
+
+
     // printf("printing");
-    
+
     // grab our file
     struct file *fl = (struct file*)arg;
     // grab the lock
@@ -220,21 +220,21 @@ void *pzip(void *arg) {
     // see if we reaching end of file
     int have_end = 0;
     // iterate through the number of read threads
-    // and while the file has not been read, wait for 
+    // and while the file has not been read, wait for
     // that condition
     for (int t_num = 0; t_num < fl->num_read_threads; t_num++){
-        
-        
+
+
         // printf("=========================trying to write with thread %d==================================\n", t_num);
-        
-        
+
+
         while (fl->read_complete[t_num] == 0){
             cond_wait(&fl->finished_reading, &fl->f_lock);
         }
-        
-        
+
+
         // printf("=========================writing with thread %d==================================\n", t_num);
-        
+
         // if it is not the end of the file
         if (have_end != 1){
             // and if this thread is the one that reached the end
@@ -242,54 +242,65 @@ void *pzip(void *arg) {
                 // set have_end to true
                 have_end = 1;
             }
-            // set the starting position to the thread id * file chunk * (size of int + size of char)
-            int starting_pos =  t_num*(fl->chunk_sizes*(sizeof(int)+sizeof(char)));
-            // end position to starting position to 
+            // set the starting position to the thread id * file chunk *
+            // (size of int + size of char)
+            int starting_pos =  t_num*(fl->chunk_sizes*
+              (sizeof(int)+sizeof(char)));
+            // end position from starting position added to combo buffer at
+            // thread is times (size of int + size of char)
             int end_pos = starting_pos + ((fl->combos[t_num] - 1) * 5);
+            // get the starting number
             int starting_num = fl->buffer[starting_pos];
+            // and the starting character
             char starting_char = fl->buffer[starting_pos + 4];
 
-        
+
             // printf("--start-- = %d \n", starting_pos);
             // printf("--end-- = %d \n", end_pos);
 
-        
+            // if the starting character is the file's last char
             if (starting_char == fl->last_char) {
+                // then the last number in file is added to the starting num
                 starting_num = starting_num + fl->last_num;
-        
-        
+
+
                 // printf("starting num : %d \n", starting_num);
                 // printf("starting char : %d \n\n", starting_char);
-        
-        
+
+                // write the int and char for this combo to the output file
                 fwrite(&starting_num, sizeof(int), 1, stdout);
                 fwrite(&starting_char, sizeof(char), 1, stdout);
+                // otherwise, write the files last number and character to output
+                // and then write the starting num and char to output
             } else {
-        
-        
+
+
                 // printf("last num : %d \n", fl->last_num);
                 // printf("last char : %d \n\n", fl->last_char);
 	            // printf("starting num : %d \n", starting_num);
                 // printf("starting char : %d \n\n", starting_char);
-        
-        
+
+
                 fwrite(&fl->last_num, sizeof(int), 1, stdout);
                 fwrite(&fl->last_char, sizeof(char), 1, stdout);
-	            fwrite(&starting_num, sizeof(int), 1, stdout);
+	              fwrite(&starting_num, sizeof(int), 1, stdout);
                 fwrite(&starting_char, sizeof(char), 1, stdout);
             }
-        
-        
+
+
             // printf("starting with combo at %d and going to %d\n\n", starting_pos + 5, end_pos);
             // printf("starting with combo int = %d and char = %d\n\n", fl->buffer[starting_pos + 5], fl->buffer[starting_pos+9]);
 
-
+            // iterate through the buffer and start from the second combos
+            // write the number of letters to the output file
+            // and then write the actual character
             for (int n = starting_pos + 5; n < end_pos; n++){
                 fwrite(&fl->buffer[n], sizeof(int), 1, stdout);
                 n = n + 4;
                 fwrite(&fl->buffer[n], sizeof(char), 1, stdout);
             }
-
+            // if this thread has the end of the file
+            // then write the number and character to the output file
             if (fl->has_end[t_num] == 1) {
 
 
@@ -300,6 +311,9 @@ void *pzip(void *arg) {
                 fwrite(&fl->buffer[end_pos], sizeof(int), 1, stdout);
                 fwrite(&fl->buffer[end_pos + 4], sizeof(char), 1, stdout);
                 // fwrite(eof_line, sizeof(char), 1, stdout);
+
+                // else, set the last num and char to what is at the end of the
+                // buffer
             } else {
 
 
@@ -308,15 +322,22 @@ void *pzip(void *arg) {
 
                 fl->last_num = fl->buffer[end_pos];
                 fl->last_char = fl->buffer[end_pos+4];
-        
+
             }
         }
     }
+    // release the lock
     lock_release(&fl->f_lock);
-    return NULL;          
+    return NULL;
 }
 
+// function for creating read threads
 void create_r_threads(struct file *fl, int num, pthread_t *thrd){
+    // iterate through the number of threads needed to be made
+    // every thread will have its own control thread
+    // that has its thread id and the file
+    // and it will create a thread with a real pthread id with our read file
+    // and the control info thread
     for (int n = 0; n < num; n++) {
         struct thread_control *thrd_cntrl = (struct thread_control*)malloc(sizeof(struct thread_control));
         thrd_cntrl->thread_num = n;
@@ -328,33 +349,52 @@ void create_r_threads(struct file *fl, int num, pthread_t *thrd){
 
 
         int ret = pthread_create(&tid, NULL, read_file, thrd_cntrl);
+        // error checking for pthread_create
         if (ret != 0) {
             perror("pthread_create");
             exit(1);
         }
+        // set the thread at n to be the real pthread id
         thrd[n] = tid;
     }
 }
 
+// function that serves as our task manager thread
 void *manageThreads(void *arg) {
     struct file *fl = (struct file*)arg;
     //int num = get_nprocs();
+    // number of read threads will be the number of available threads
     fl->num_read_threads = get_nprocs();
+    // we only need one writing thread
     fl->num_zip_threads = 1;
+    // the chunk size will be the buffer size
     fl->chunk_sizes = BUFF_SIZE;
-    fl->buffer = (char*)malloc(BUFF_SIZE*fl->num_read_threads*(sizeof(int)+sizeof(char)));
+    // allocating memory for the file buffer
+    fl->buffer = (char*)malloc(BUFF_SIZE*fl->num_read_threads*
+      (sizeof(int)+sizeof(char)));
+    // allocating memory for the combo buffer
     fl->combos = (int*)malloc(fl->num_read_threads*sizeof(int));
-    pthread_t *rthrd = (pthread_t *)(malloc(fl->num_read_threads*sizeof(pthread_t)));
+    // allocate memory for all the read threads
+    pthread_t *rthrd = (pthread_t *)
+      (malloc(fl->num_read_threads*sizeof(pthread_t)));
+    // allocate memory for the read_complete buffer
     fl->read_complete = (int *)(calloc(fl->num_read_threads,sizeof(int)));
+    // allocate memory for the has end buffer
     fl->has_end = (int *)(calloc(fl->num_read_threads,sizeof(int)));
+    // one loop size is the number of threads * the chunk size
     int loop_size = fl->num_read_threads * fl->chunk_sizes;
+    // divide the file size by the loop size
     div_t loops_d = div(fl->file_size,loop_size);
     int loops = 0;
+    // if there are no remainders, add one to the quotient of loops_d
     if (loops_d.rem != 0) {
 	    loops = loops_d.quot + 1;
     } else {
+      // if not, then just keep the answer
 	    loops = loops_d.quot;
     }
+    // for every loop, set the loop number to the index
+    // and create the read threads
     for (int l = 0; l < loops; l++){
         fl->loop_num = l;
         create_r_threads(fl, fl->num_read_threads, rthrd);
@@ -365,7 +405,7 @@ void *manageThreads(void *arg) {
 
         // printf("!!!!!!!!!!!!!!!!writing thread!!!!!!!!!!!!!!!!!\n");
 
-
+        // error checking for this pthread_create
         int ret = pthread_create(&tid, NULL, pzip, fl);
         if (ret != 0) {
             perror("pthread_create");
@@ -378,7 +418,7 @@ void *manageThreads(void *arg) {
         // printf("-------------------------------------------------------------------------%d\n", n);
         // for (n; n < fl->num_read_threads; n++){
         //     printf("---------------------------------------------------------------------%d\n", n);
-        //     lock_acquire(&fl->f_lock); 
+        //     lock_acquire(&fl->f_lock);
         //     struct thread_control thrd_cntrl;
         //     printf("printing thread %d\n", n);
         //     thrd_cntrl.thread_num = n;
@@ -390,7 +430,7 @@ void *manageThreads(void *arg) {
         //         printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@got signal from thread %d\n", n);
         //     }
         //     pthread_t tid;
-            
+
         //     printf("printing thread %d\n", thrd_cntrl.thread_num);
         //     int ret = pthread_create(&tid, NULL, pzip, &thrd_cntrl);
         //     if (ret != 0) {
@@ -404,19 +444,24 @@ void *manageThreads(void *arg) {
         //     lock_release(&fl->f_lock);
         // }
     }
+    // free the file and combo buffer
     free(fl->buffer);
     free(fl->combos);
     free(rthrd);
     return NULL;
 }
 
+// main function where we create+ initiate our file struct and open the file
 int main(int argc, char *argv[]){
     struct file fl;
  	pzip_init(&fl);
     openFile(argv[1], &fl);
+    // if there are threads available
     if (get_nprocs > 0) {
+      // create a manager thread
        pthread_t tid;
        int ret = pthread_create(&tid, NULL, manageThreads, &fl);
+       // error checking
        if (ret != 0) {
           perror("pthread_create");
           exit(1);
