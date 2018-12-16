@@ -33,12 +33,9 @@ struct file {
     char last_char;
     int last_num;
     int num_read_threads;
-    int num_zip_threads;
     int chunk_sizes;
     struct lock f_lock;
-    struct condition made_threads;
     struct condition finished_reading;
-    struct condition finished_file;
 };
 // Data structure to hold information about specific
 // thread being run such as a thread number + file
@@ -54,9 +51,7 @@ void pzip_init(struct file *fl){
     fl->last_char = -1;
     fl->last_num = 0;
     lock_init(&fl->f_lock);
-    cond_init(&fl->made_threads);
     cond_init(&fl->finished_reading);
-    cond_init(&fl->finished_file);
 }
 
 // function for opening the file from the path given
@@ -102,7 +97,7 @@ void *read_file(void *arg) {
     // the end position is found by add a chunk size to the starting position
     int end_pos = (starting_pos + (fl->chunk_sizes));
     // if the end position is past the file size
-    if (end_pos >= fl->file_size) {
+    if (end_pos > fl->file_size) {
         // change end position to the last char of the file
         end_pos = (fl->file_size) - 1;
         // change end of file boolean to true
@@ -200,10 +195,11 @@ void *read_file(void *arg) {
     fl->read_complete[t_num] = 1;
     // signal that we are finished with reading
     cond_signal(&fl->finished_reading, &fl->f_lock);
-    // release the lock
-    lock_release(&fl->f_lock);
     // free up the memory used for specific thread info
     free(tc);
+    // release the lock
+    lock_release(&fl->f_lock);
+    
     return NULL;
 }
 
@@ -245,10 +241,10 @@ void *pzip(void *arg) {
             // set the starting position to the thread id * file chunk *
             // (size of int + size of char)
             int starting_pos =  t_num*(fl->chunk_sizes*
-              (sizeof(int)+sizeof(char)));
+            (sizeof(int)+sizeof(char)));
             // end position from starting position added to combo buffer at
             // thread is times (size of int + size of char)
-            int end_pos = starting_pos + ((fl->combos[t_num] - 1) * 5);
+            int end_pos = starting_pos + ((fl->combos[t_num]) * 5);
             // get the starting number
             int starting_num = fl->buffer[starting_pos];
             // and the starting character
@@ -259,13 +255,13 @@ void *pzip(void *arg) {
             // printf("--end-- = %d \n", end_pos);
 
             // if the starting character is the file's last char
-            if (starting_char == fl->last_char) {
+            if (starting_char == fl->last_char /*|| (fl->loop_num == 0 && t_num == 0)*/ ) {
                 // then the last number in file is added to the starting num
                 starting_num = starting_num + fl->last_num;
 
 
-                // printf("starting num : %d \n", starting_num);
-                // printf("starting char : %d \n\n", starting_char);
+                // printf("printing starting num 1: %d \n", starting_num);
+                // printf("printing starting char 1: %d \n\n", starting_char);
 
                 // write the int and char for this combo to the output file
                 fwrite(&starting_num, sizeof(int), 1, stdout);
@@ -273,18 +269,23 @@ void *pzip(void *arg) {
                 // otherwise, write the files last number and character to output
                 // and then write the starting num and char to output
             } else {
-
-
-                // printf("last num : %d \n", fl->last_num);
-                // printf("last char : %d \n\n", fl->last_char);
-	            // printf("starting num : %d \n", starting_num);
-                // printf("starting char : %d \n\n", starting_char);
-
-
+                // printf("num combos : %d", fl->combos[t_num]);
+                // if( !(fl->loop_num == 0 && t_num == 0)){
+                // printf("printing last num 1: %d \n", fl->last_num);
+                // printf("printing last char 1: %d \n\n", fl->last_char);
+                // }
+                // if(fl->combos[t_num] > 1 || (fl->has_end[t_num] == 1 && fl->combos[t_num] > 1)){
+	            //     printf("printing starting num 2: %d \n", starting_num);
+                //     printf("printing starting char 2: %d \n\n", starting_char);
+                // }
+                if( !(fl->loop_num == 0 && t_num == 0)){
                 fwrite(&fl->last_num, sizeof(int), 1, stdout);
                 fwrite(&fl->last_char, sizeof(char), 1, stdout);
-	              fwrite(&starting_num, sizeof(int), 1, stdout);
-                fwrite(&starting_char, sizeof(char), 1, stdout);
+                }
+                if(fl->combos[t_num] > 1 || (fl->has_end[t_num] == 1 && fl->combos[t_num] > 1)){
+	                fwrite(&starting_num, sizeof(int), 1, stdout);
+                    fwrite(&starting_char, sizeof(char), 1, stdout);
+                }
             }
 
 
@@ -294,9 +295,11 @@ void *pzip(void *arg) {
             // iterate through the buffer and start from the second combos
             // write the number of letters to the output file
             // and then write the actual character
-            for (int n = starting_pos + 5; n < end_pos; n++){
+            for (int n = starting_pos + 5; n < end_pos-5; n++){
                 fwrite(&fl->buffer[n], sizeof(int), 1, stdout);
+                // printf("num : %d \n", fl->buffer[n]);
                 n = n + 4;
+                // printf("char : %d \n\n", fl->buffer[n]);
                 fwrite(&fl->buffer[n], sizeof(char), 1, stdout);
             }
             // if this thread has the end of the file
@@ -307,21 +310,16 @@ void *pzip(void *arg) {
                 // printf("\n\n\n\n\n eof");
 
 
-                // char *eof_line = "\n";
-                fwrite(&fl->buffer[end_pos], sizeof(int), 1, stdout);
-                fwrite(&fl->buffer[end_pos + 4], sizeof(char), 1, stdout);
-                // fwrite(eof_line, sizeof(char), 1, stdout);
+                // fwrite(&fl->buffer[end_pos], sizeof(int), 1, stdout);
+                // fwrite(&fl->buffer[end_pos + 4], sizeof(char), 1, stdout);
 
                 // else, set the last num and char to what is at the end of the
                 // buffer
             } else {
 
 
-                // printf("updating last char\n\n\n\n");
-
-
-                fl->last_num = fl->buffer[end_pos];
-                fl->last_char = fl->buffer[end_pos+4];
+                fl->last_num = fl->buffer[end_pos-5];
+                fl->last_char = fl->buffer[end_pos-5+4];
 
             }
         }
@@ -365,8 +363,6 @@ void *manageThreads(void *arg) {
     //int num = get_nprocs();
     // number of read threads will be the number of available threads
     fl->num_read_threads = get_nprocs();
-    // we only need one writing thread
-    fl->num_zip_threads = 1;
     // the chunk size will be the buffer size
     fl->chunk_sizes = BUFF_SIZE;
     // allocating memory for the file buffer
@@ -386,7 +382,7 @@ void *manageThreads(void *arg) {
     // divide the file size by the loop size
     div_t loops_d = div(fl->file_size,loop_size);
     int loops = 0;
-    // if there are no remainders, add one to the quotient of loops_d
+    // if there are remainders, add one to the quotient of loops_d
     if (loops_d.rem != 0) {
 	    loops = loops_d.quot + 1;
     } else {
@@ -399,52 +395,20 @@ void *manageThreads(void *arg) {
         fl->loop_num = l;
         create_r_threads(fl, fl->num_read_threads, rthrd);
 
-
+        //create a writing thread
         pthread_t tid;
-
-
-        // printf("!!!!!!!!!!!!!!!!writing thread!!!!!!!!!!!!!!!!!\n");
-
-        // error checking for this pthread_create
         int ret = pthread_create(&tid, NULL, pzip, fl);
+        // error checking for this pthread_create
         if (ret != 0) {
             perror("pthread_create");
             exit(1);
         }
         pthread_join(tid,NULL);
 
-
-        // int n = 0;
-        // printf("-------------------------------------------------------------------------%d\n", n);
-        // for (n; n < fl->num_read_threads; n++){
-        //     printf("---------------------------------------------------------------------%d\n", n);
-        //     lock_acquire(&fl->f_lock);
-        //     struct thread_control thrd_cntrl;
-        //     printf("printing thread %d\n", n);
-        //     thrd_cntrl.thread_num = n;
-        //     thrd_cntrl.Fl = fl;
-        //     printf("looking for thread %d\n", n);
-        //     while(fl->read_complete[n] != 1){
-        //         printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@need thread %d\n", n);
-        //         cond_wait(&fl->finished_reading, &fl->f_lock);
-        //         printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@got signal from thread %d\n", n);
-        //     }
-        //     pthread_t tid;
-
-        //     printf("printing thread %d\n", thrd_cntrl.thread_num);
-        //     int ret = pthread_create(&tid, NULL, pzip, &thrd_cntrl);
-        //     if (ret != 0) {
-        //         perror("pthread_create");
-        //         exit(1);
-        //     }
-        //     if (n == fl->num_read_threads - 1){
-        //         pthread_join(tid,NULL);
-        //     }
-
-        //     lock_release(&fl->f_lock);
-        // }
     }
     // free the file and combo buffer
+    free(fl->has_end);
+    free(fl->read_complete);
     free(fl->buffer);
     free(fl->combos);
     free(rthrd);
